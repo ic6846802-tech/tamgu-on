@@ -1,23 +1,201 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-const configured=SUPABASE_URL.startsWith("https://")&&!SUPABASE_URL.includes("YOUR-PROJECT")&&SUPABASE_ANON_KEY.length>20&&!SUPABASE_ANON_KEY.includes("YOUR_SUPABASE");
-const $=id=>document.getElementById(id);let sb=null,user=null,tasks=[],month=new Date(new Date().getFullYear(),new Date().getMonth(),1),selected=fmt(new Date()),editing=null;
-if(configured)sb=createClient(SUPABASE_URL,SUPABASE_ANON_KEY);else $("setup-warning").classList.remove("hidden");
-function fmt(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
-function esc(s=""){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function toast(s){let e=$("toast");e.textContent=s;e.classList.remove("hidden");clearTimeout(toast.timer);toast.timer=setTimeout(()=>e.classList.add("hidden"),4000)}
-function signed(u){user=u;$("auth").classList.toggle("hidden",!!u);$("workspace").classList.toggle("hidden",!u);$("logout").classList.toggle("hidden",!u);$("user-email").textContent=u?.email||"로그인 전"}
-function tab(name){document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));document.querySelectorAll(".tab-panel").forEach(p=>p.classList.add("hidden"));$(name).classList.remove("hidden");if(name==="calendar")draw()}
-document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>tab(b.dataset.tab));$("new-task").onclick=()=>tab("add");
-$("auth-form").onsubmit=async e=>{e.preventDefault();if(!sb)return toast("README의 Supabase 설정을 먼저 완료해 주세요.");$("login").disabled=true;try{let {error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});if(error)throw error;toast("로그인했어요.")}catch(x){toast("로그인 실패: "+x.message)}finally{$("login").disabled=false}};
-$("signup").onclick=async()=>{if(!sb)return toast("README의 Supabase 설정을 먼저 완료해 주세요.");let email=$("email").value.trim(),password=$("password").value;if(!email||password.length<8)return toast("이메일과 8자 이상의 비밀번호를 입력해 주세요.");$("signup").disabled=true;try{let {data,error}=await sb.auth.signUp({email,password,options:{emailRedirectTo:location.origin}});if(error)throw error;toast(data.session?"가입 완료!":"가입 요청 완료. 이메일 인증 링크를 확인하세요.")}catch(x){toast("가입 실패: "+x.message)}finally{$("signup").disabled=false}};
-$("logout").onclick=async()=>{if(sb){let {error}=await sb.auth.signOut();if(error)toast("로그아웃 실패: "+error.message)}};
-async function load(){if(!sb||!user)return;let {data,error}=await sb.from("assignments").select("id,subject,title,due_date,notes,created_at").order("due_date");if(error){console.error(error);toast("과제를 불러오지 못했어요. SQL/RLS 설정을 확인하세요.");return}tasks=data||[];draw()}
-function draw(){let y=month.getFullYear(),m=month.getMonth();$("month-label").textContent=`${y}년 ${m+1}월`;let g=$("calendar-grid");g.innerHTML="";["일","월","화","수","목","금","토"].forEach(n=>{let x=document.createElement("div");x.className="day-name";x.textContent=n;g.append(x)});let start=new Date(y,m,1-new Date(y,m,1).getDay());for(let i=0;i<42;i++){let d=new Date(start);d.setDate(start.getDate()+i);let date=fmt(d),ts=tasks.filter(t=>t.due_date===date),b=document.createElement("button");b.type="button";b.className="day-cell"+(d.getMonth()!==m?" outside":"")+(date===selected?" selected":"");b.innerHTML=`<span class="day-num">${d.getDate()}</span>`+ts.slice(0,2).map(t=>`<span class="day-dot">${esc(t.title)}</span>`).join("")+(ts.length>2?`<span class="day-dot">+${ts.length-2}</span>`:"");b.onclick=()=>{selected=date;if(d.getMonth()!==m)month=new Date(d.getFullYear(),d.getMonth(),1);draw()};g.append(b)}let todays=tasks.filter(t=>t.due_date===selected);$("selected-label").textContent=`${Number(selected.slice(5,7))}월 ${Number(selected.slice(8,10))}일 과제`;$("task-count").textContent=`${todays.length}개`;let list=$("task-list");if(!todays.length){list.innerHTML='<p class="muted small">이 날짜에 등록된 과제가 없어요.</p>';return}list.innerHTML=todays.map(t=>`<div class="task-card"><div class="task-date">${esc(t.due_date.slice(5).replace("-","/"))}</div><div class="task-main"><h4>${esc(t.title)}</h4><p>${esc(t.subject||"과목 미입력")}${t.notes?" · "+esc(t.notes):""}</p></div><div class="task-actions"><button data-edit="${t.id}">수정</button><button data-del="${t.id}">삭제</button></div></div>`).join("");list.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>del(b.dataset.del));list.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>edit(b.dataset.edit))}
-$("prev").onclick=()=>{month=new Date(month.getFullYear(),month.getMonth()-1,1);draw()};$("next").onclick=()=>{month=new Date(month.getFullYear(),month.getMonth()+1,1);draw()};$("today").onclick=()=>{selected=fmt(new Date());month=new Date(new Date().getFullYear(),new Date().getMonth(),1);draw()};
-function edit(id){let t=tasks.find(x=>x.id===id);if(!t)return;editing=id;$("subject").value=t.subject||"";$("title").value=t.title;$("due").value=t.due_date;$("notes").value=t.notes||"";tab("add");toast("수정 후 저장해 주세요.")}
-async function del(id){if(!confirm("이 과제를 삭제할까요?"))return;let {error}=await sb.from("assignments").delete().eq("id",id);if(error)return toast("삭제 실패: "+error.message);await load();toast("삭제했어요.")}
-$("task-form").onsubmit=async e=>{e.preventDefault();if(!sb||!user)return toast("먼저 로그인해 주세요.");let r={subject:$("subject").value.trim(),title:$("title").value.trim(),due_date:$("due").value,notes:$("notes").value.trim(),user_id:user.id};if(!r.title||!r.due_date)return toast("과제명과 마감일을 입력해 주세요.");let result=editing?await sb.from("assignments").update({subject:r.subject,title:r.title,due_date:r.due_date,notes:r.notes}).eq("id",editing):await sb.from("assignments").insert(r);if(result.error){console.error(result.error);return toast("저장 실패. SQL/RLS 설정을 확인하세요.")}editing=null;e.target.reset();$("ocr-raw").value="";selected=r.due_date;month=new Date(+r.due_date.slice(0,4),+r.due_date.slice(5,7)-1,1);await load();tab("calendar");toast("과제를 저장했어요.")};$("reset").onclick=()=>editing=null;
-$("photo").onchange=()=>{let f=$("photo").files[0];$("ocr-status").textContent=f?`${f.name} · ${(f.size/1048576).toFixed(1)}MB` : "사진을 선택한 다음 인식을 시작하세요."};
-$("ocr").onclick=async()=>{let f=$("photo").files[0];if(!f)return toast("먼저 사진을 선택해 주세요.");if(!window.Tesseract)return toast("OCR 라이브러리를 불러오지 못했어요. 인터넷을 확인하세요.");if(f.size>12*1048576)return toast("12MB 이하의 사진을 선택해 주세요.");$("ocr").disabled=true;$("ocr-status").textContent="한국어 글자를 인식하는 중…";try{let res=await Tesseract.recognize(f,"kor+eng",{logger:m=>{if(m.status==="recognizing text")$("ocr-status").textContent=`글자 인식 중… ${Math.round((m.progress||0)*100)}%`}});let text=(res.data.text||"").trim();$("ocr-raw").value=text;if(!text){$("ocr-status").textContent="글자를 찾지 못했어요. 선명한 사진으로 다시 시도해 주세요.";return}let lines=text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);if(!$("title").value){let c=lines.find(s=>s.length>=4&&s.length<=90&&!/평가 기준|제출 기한|제출일|과목명/.test(s));if(c)$("title").value=c}if(!$("subject").value){let c=lines.find(s=>/(국어|수학|영어|한국지리|세계시민과 지리|사회문화|윤리와 사상|정치|과학|역사|중국어)/.test(s));if(c)$("subject").value=c.slice(0,80)}let match=text.match(/(20\d{2})\s*[년./-]\s*(\d{1,2})\s*[월./-]\s*(\d{1,2})\s*일?/);if(match&&!$("due").value){let yy=+match[1],mm=+match[2],dd=+match[3],dt=new Date(yy,mm-1,dd);if(dt.getFullYear()===yy&&dt.getMonth()===mm-1&&dt.getDate()===dd)$("due").value=`${yy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`}$("ocr-status").textContent="인식 완료. 과목·과제명·마감일을 직접 확인하고 수정한 뒤 저장하세요.";toast("OCR 완료. 결과를 꼭 확인해 주세요.")}catch(err){console.error(err);$("ocr-status").textContent="인식에 실패했어요. 밝고 선명한 사진으로 다시 시도해 주세요."}finally{$("ocr").disabled=false}};
-if(sb){sb.auth.onAuthStateChange((_e,s)=>{signed(s?.user||null);if(s?.user)setTimeout(load,0);else{tasks=[];draw()}});sb.auth.getSession().then(({data})=>{signed(data.session?.user||null);if(data.session?.user)load()})}else{signed(null);$("task-list").innerHTML='<p class="muted small">Supabase 설정을 완료하면 과제를 불러올 수 있어요.</p>';draw()}
+
+const $ = (id) => document.getElementById(id);
+const authPanel = $("auth-panel");
+const appPanel = $("app-panel");
+const authMessage = $("auth-message");
+const taskMessage = $("task-message");
+let supabase = null;
+let currentUser = null;
+
+function say(el, text, kind = "") {
+  el.textContent = text;
+  el.className = `message ${kind}`.trim();
+}
+function setStatus(text, good = false) {
+  $("connection-status").textContent = text;
+  $("connection-status").classList.toggle("good", good);
+}
+function configured() {
+  return SUPABASE_URL.startsWith("https://") &&
+    !SUPABASE_URL.includes("PASTE_") &&
+    SUPABASE_ANON_KEY.length > 20 &&
+    !SUPABASE_ANON_KEY.includes("PASTE_");
+}
+function showAuth() {
+  authPanel.classList.remove("hidden");
+  appPanel.classList.add("hidden");
+}
+function showApp(user) {
+  authPanel.classList.add("hidden");
+  appPanel.classList.remove("hidden");
+  $("signed-in-as").textContent = user.email || "로그인됨";
+}
+function formatError(error) {
+  if (!error) return "알 수 없는 오류가 발생했어요.";
+  const message = error.message || String(error);
+  if (/Invalid login credentials/i.test(message)) return "이메일 또는 비밀번호가 맞지 않아요.";
+  if (/Email not confirmed/i.test(message)) return "이메일 인증이 필요해요. 받은편지함과 스팸함을 확인해 주세요.";
+  if (/already registered/i.test(message)) return "이미 가입된 이메일이에요. 로그인해 보세요.";
+  return message;
+}
+async function refreshTasks() {
+  if (!supabase || !currentUser) return;
+  const list = $("task-list");
+  list.innerHTML = '<p class="muted">불러오는 중…</p>';
+  const { data, error } = await supabase
+    .from("assignments")
+    .select("id,subject,title,due_date,notes,created_at")
+    .order("due_date", { ascending: true });
+  if (error) {
+    list.innerHTML = "";
+    say(taskMessage, `과제를 불러오지 못했어요: ${formatError(error)}`, "error");
+    return;
+  }
+  say(taskMessage, "");
+  if (!data?.length) {
+    list.innerHTML = '<p class="muted">아직 등록한 과제가 없어. 왼쪽에서 첫 과제를 추가해 봐!</p>';
+    return;
+  }
+  list.innerHTML = "";
+  for (const task of data) {
+    const card = document.createElement("article");
+    card.className = "task-card";
+    const details = document.createElement("div");
+    const heading = document.createElement("h4");
+    heading.textContent = task.title;
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    meta.textContent = `${task.due_date} · ${task.subject || "과목 미입력"}`;
+    details.append(heading, meta);
+    if (task.notes) {
+      const note = document.createElement("p");
+      note.textContent = task.notes;
+      details.append(note);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "삭제";
+    remove.addEventListener("click", async () => {
+      if (!confirm(`'${task.title}' 과제를 삭제할까?`)) return;
+      const { error: deleteError } = await supabase.from("assignments").delete().eq("id", task.id);
+      if (deleteError) say(taskMessage, `삭제 실패: ${formatError(deleteError)}`, "error");
+      else await refreshTasks();
+    });
+    card.append(details, remove);
+    list.append(card);
+  }
+}
+
+async function init() {
+  if (!configured()) {
+    setStatus("설정 필요");
+    say(authMessage, "config.js에 Supabase Project URL과 Publishable key를 먼저 입력해 주세요.", "error");
+    return;
+  }
+  try {
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    setStatus("Supabase 연결 준비 완료", true);
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    if (data.session?.user) {
+      currentUser = data.session.user;
+      showApp(currentUser);
+      await refreshTasks();
+    } else {
+      showAuth();
+    }
+    supabase.auth.onAuthStateChange(async (_event, session) => {
+      currentUser = session?.user || null;
+      if (currentUser) {
+        showApp(currentUser);
+        await refreshTasks();
+      } else {
+        showAuth();
+      }
+    });
+  } catch (error) {
+    setStatus("연결 오류");
+    say(authMessage, `초기화 실패: ${formatError(error)}`, "error");
+  }
+}
+
+$("signup").addEventListener("click", async () => {
+  if (!supabase) return say(authMessage, "Supabase 설정을 먼저 확인해 주세요.", "error");
+  const email = $("email").value.trim();
+  const password = $("password").value;
+  if (!email || password.length < 8) return say(authMessage, "이메일과 8자 이상의 비밀번호를 입력해 주세요.", "error");
+  $("signup").disabled = true;
+  say(authMessage, "회원가입 요청 중…");
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email, password,
+      options: { emailRedirectTo: window.location.href.split("#")[0] }
+    });
+    if (error) throw error;
+    say(authMessage, data.session
+      ? "가입 및 로그인 완료!"
+      : "가입 요청을 보냈어요. 이메일 인증이 켜져 있다면 받은편지함과 스팸함을 확인해 주세요.", "success");
+  } catch (error) {
+    say(authMessage, `가입 실패: ${formatError(error)}`, "error");
+  } finally {
+    $("signup").disabled = false;
+  }
+});
+
+$("auth-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!supabase) return say(authMessage, "Supabase 설정을 먼저 확인해 주세요.", "error");
+  const email = $("email").value.trim();
+  const password = $("password").value;
+  if (!email || !password) return say(authMessage, "이메일과 비밀번호를 입력해 주세요.", "error");
+  $("login").disabled = true;
+  say(authMessage, "로그인 요청 중…");
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    currentUser = data.user;
+    showApp(currentUser);
+    await refreshTasks();
+    say(authMessage, "");
+  } catch (error) {
+    say(authMessage, `로그인 실패: ${formatError(error)}`, "error");
+  } finally {
+    $("login").disabled = false;
+  }
+});
+
+$("logout").addEventListener("click", async () => {
+  if (!supabase) return;
+  const { error } = await supabase.auth.signOut();
+  if (error) say(taskMessage, `로그아웃 실패: ${formatError(error)}`, "error");
+});
+$("refresh").addEventListener("click", refreshTasks);
+$("task-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!supabase || !currentUser) return say(taskMessage, "먼저 로그인해 주세요.", "error");
+  const payload = {
+    user_id: currentUser.id,
+    subject: $("subject").value.trim(),
+    title: $("title").value.trim(),
+    due_date: $("due").value,
+    notes: $("notes").value.trim() || null
+  };
+  if (!payload.title || !payload.due_date) return say(taskMessage, "과제 이름과 제출일을 입력해 주세요.", "error");
+  $("save-task").disabled = true;
+  try {
+    const { error } = await supabase.from("assignments").insert(payload);
+    if (error) throw error;
+    $("task-form").reset();
+    say(taskMessage, "과제를 저장했어요!", "success");
+    await refreshTasks();
+  } catch (error) {
+    say(taskMessage, `저장 실패: ${formatError(error)}`, "error");
+  } finally {
+    $("save-task").disabled = false;
+  }
+});
+
+init();
